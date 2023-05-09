@@ -1163,8 +1163,9 @@ class TestWriteWaveforms(TestCase):
         self.nwbfile = NWBFile(
             session_description="session_description1", identifier="file_id1", session_start_time=testing_session_time
         )
+        self.h5file = self.tmpdir / "test.h5"
 
-    def _test_waveform_write(self, we, nwbfile, test_properties=True):
+    def _test_waveform_write(self, we, nwbfile, test_properties=True, test_waveforms=True):
         # test unit columns
         self.assertIn("waveform_mean", nwbfile.units.colnames)
         self.assertIn("waveform_sd", nwbfile.units.colnames)
@@ -1175,15 +1176,17 @@ class TestWriteWaveforms(TestCase):
         # test that electrode table has been saved
         assert nwbfile.electrodes is not None
         assert len(we.unit_ids) == len(nwbfile.units)
-        # test that waveforms and stds are the same
-        unit_ids = we.unit_ids
-        for unit_index, _ in enumerate(nwbfile.units.id):
-            wf_mean_si = we.get_template(unit_ids[unit_index])
-            wf_mean_nwb = nwbfile.units[unit_index]["waveform_mean"].values[0]
-            np.testing.assert_array_almost_equal(wf_mean_si, wf_mean_nwb)
-            wf_sd_si = we.get_template(unit_ids[unit_index], mode="std")
-            wf_sd_nwb = nwbfile.units[unit_index]["waveform_sd"].values[0]
-            np.testing.assert_array_almost_equal(wf_sd_si, wf_sd_nwb)
+
+        if test_waveforms:
+            # test that waveforms and stds are the same
+            unit_ids = we.unit_ids
+            for unit_index, _ in enumerate(nwbfile.units.id):
+                wf_mean_si = we.get_template(unit_ids[unit_index])
+                wf_mean_nwb = nwbfile.units[unit_index]["waveform_mean"].values[0]
+                np.testing.assert_array_almost_equal(wf_mean_si, wf_mean_nwb)
+                wf_sd_si = we.get_template(unit_ids[unit_index], mode="std")
+                wf_sd_nwb = nwbfile.units[unit_index]["waveform_sd"].values[0]
+                np.testing.assert_array_almost_equal(wf_sd_si, wf_sd_nwb)
 
     def test_write_single_segment(self):
         """This tests that the waveforms are written appropriately for the single segment case"""
@@ -1351,6 +1354,37 @@ class TestWriteWaveforms(TestCase):
         for i, row in enumerate(self.nwbfile.units.id):
             self.assertEqual(self.nwbfile.units[row].electrodes.values[0], list(sparse_indices[unit_ids[i]]))
 
+    def test_write_sparse_waveforms_force_dense(self):
+        """This tests that the waveforms are written appropriately when they are sparse"""
+        write_waveforms(waveform_extractor=self.we_sparse, nwbfile=self.nwbfile, write_electrical_series=False,
+                        force_dense=True)
+        self._test_waveform_write(self.we_sparse, self.nwbfile, test_waveforms=False)
+        unit_ids = self.we_sparse.unit_ids
+        sparse_indices = self.we_sparse.sparsity.unit_id_to_channel_indices
+        all_indices = np.arange(self.we_sparse.recording.get_num_channels())
+        # test that waveforms and stds are the same
+        for i, row in enumerate(self.nwbfile.units.id):
+            self.assertEqual(self.nwbfile.units[row].electrodes.values[0], list(all_indices))
+            wf_mean_si = self.we_sparse.get_template(unit_ids[i])
+            wf_mean_nwb = self.nwbfile.units[i]["waveform_mean"].values[0]
+            np.testing.assert_array_almost_equal(wf_mean_si, wf_mean_nwb[:, sparse_indices[unit_ids[i]]])
+            wf_sd_si = self.we_sparse.get_template(unit_ids[i], mode="std")
+            wf_sd_nwb = self.nwbfile.units[i]["waveform_sd"].values[0]
+            np.testing.assert_array_almost_equal(wf_sd_si, wf_sd_nwb[:, sparse_indices[unit_ids[i]]])
+
+    def test_write_sparse_waveforms_to_file_force_dense(self):
+        """This tests that the waveforms are written appropriately when they are sparse"""
+        write_waveforms(waveform_extractor=self.we_sparse, nwbfile=self.nwbfile, write_electrical_series=False,
+                        force_dense=True)
+        with NWBHDF5IO(self.h5file, "w") as io:
+            io.write(self.nwbfile)
+
+    @unittest.expectedFailure
+    def test_write_sparse_waveforms_to_file(self):
+        """This tests that the waveforms are written appropriately when they are sparse"""
+        write_waveforms(waveform_extractor=self.we_sparse, nwbfile=self.nwbfile, write_electrical_series=False)
+        with NWBHDF5IO(self.h5file, "w") as io:
+            io.write(self.nwbfile)
 
 if __name__ == "__main__":
     unittest.main()
