@@ -359,12 +359,22 @@ def add_electrodes(recording: BaseRecording, nwbfile: pynwb.NWBFile, metadata: d
         for index in rows_in_data
         if (channel_name_array[index], group_name_array[index]) not in channel_group_names_used_previously
     ]
-    for row in rows_to_add:
-        electrode_kwargs = dict(all_properties_to_default_value)
-        for property in properties_with_data:
-            electrode_kwargs[property] = data_to_add[property]["data"][row]
+    table_ids = []
+    for row in rows_in_data:
+        if row in rows_to_add:
+            electrode_kwargs = dict(all_properties_to_default_value)
+            for property in properties_with_data:
+                electrode_kwargs[property] = data_to_add[property]["data"][row]
 
-        nwbfile.add_electrode(**electrode_kwargs, enforce_unique_id=True)
+            nwbfile.add_electrode(**electrode_kwargs, enforce_unique_id=True)
+            table_id_entry = nwbfile.electrodes.id[-1]
+        else:
+            previous_electrodes = nwbfile.electrodes.to_dataframe()
+            channel_name = channel_name_array[row]
+            group_name = group_name_array[row]
+            previous_entry = previous_electrodes.query(f"channel_name == '{channel_name}' and group_name == '{group_name}'")
+            table_id_entry = previous_entry.index[0]
+        table_ids.append(table_id_entry)
 
     # Add channel_name as a column and fill previously existing rows with channel_name equal to str(ids)
     previous_table_size = len(nwbfile.electrodes.id[:]) - len(channel_name_array)
@@ -410,6 +420,8 @@ def add_electrodes(recording: BaseRecording, nwbfile: pynwb.NWBFile, metadata: d
         extended_data[indexes_for_default_values] = default_value
         cols_args["data"] = extended_data
         nwbfile.add_electrode_column(property, **cols_args)
+
+    return table_ids
 
 
 def check_if_recording_traces_fit_into_memory(recording: BaseRecording, segment_index: int = 0) -> None:
@@ -616,9 +628,7 @@ def add_electrical_series(
     else:
         channel_indices = recording.ids_to_indices(channel_name_array)
 
-    add_electrodes(recording=recording, nwbfile=nwbfile, metadata=metadata)
-
-    table_ids = [list(nwbfile.electrodes.id[:]).index(id) for id in channel_indices]
+    table_ids = add_electrodes(recording=recording, nwbfile=nwbfile, metadata=metadata)
 
     electrode_table_region = nwbfile.create_electrode_table_region(
         region=table_ids, description="electrode_table_region"
@@ -754,7 +764,7 @@ def add_electrodes_info(recording: BaseRecording, nwbfile: pynwb.NWBFile, metada
     """
     add_devices(nwbfile=nwbfile, metadata=metadata)
     add_electrode_groups(recording=recording, nwbfile=nwbfile, metadata=metadata)
-    add_electrodes(recording=recording, nwbfile=nwbfile, metadata=metadata)
+    _ = add_electrodes(recording=recording, nwbfile=nwbfile, metadata=metadata)
 
 
 def write_recording(
